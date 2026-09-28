@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR ยิงธนูสู้คำกริยา</title>
+    <!-- Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- External Libraries (CDNs) -->
+    <!-- Note: using unpkg for Three.js as it's more reliable than cdnjs for specific older versions if needed, but using latest stable here -->
+    <script src="https://unpkg.com/three@0.141.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* ==========================================
+           CSS STYLES
+           ========================================== */
+        :root {
+            --primary-color: #4CAF50;
+            --danger-color: #F44336;
+            --dark-color: #333;
+            --light-color: #fff;
+            --bg-overlay: rgba(0, 0, 0, 0.7);
+            --zone-border: rgba(255, 255, 255, 0.3);
+            --font-main: 'Mitr', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            font-family: var(--font-main);
+            overflow: hidden;
+            background-color: #000;
+            color: var(--light-color);
+        }
+
+        /* Container for everything */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000; /* Ensure black background if video doesn't cover perfectly */
+        }
+
+        /* Video Background */
+        #video-element {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* Changed from cover to contain to prevent cropping and show full view */
+            transform: scaleX(-1); /* Mirror camera */
+            z-index: 1;
+        }
+
+        /* Three.js Canvas */
+        #canvas-3d {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        #right-zone {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 50%;
+            height: 100%;
+            border-left: 2px dashed var(--zone-border);
+            background: linear-gradient(-90deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        /* UI Layer */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Only buttons should capture events */
+        }
+
+        /* Start Screen */
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-overlay);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            pointer-events: auto;
+        }
+
+        #start-screen h1 {
+            font-size: 4rem;
+            color: #FFEB3B;
+            text-shadow: 2px 2px 4px #000;
+            margin-bottom: 20px;
+        }
+
+        .rules-box {
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--dark-color);
+            padding: 20px 40px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 30px;
+            max-width: 600px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+        
+        .rules-box h3 { margin-bottom: 10px; color: var(--primary-color); }
+        .rules-box p { font-size: 1.2rem; margin-bottom: 5px;}
+
+        .check-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 30px;
+            background: rgba(0,0,0,0.5);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .check-item {
+            display: flex;
+            align-items: center;
+            font-size: 1.5rem;
+        }
+
+        .status-icon {
+            margin-left: 15px;
+            width: 30px;
+            height: 30px;
+            display: inline-block;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .checkmark {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+        
+        .error-mark {
+            color: var(--danger-color);
+            font-weight: bold;
+        }
+
+        button {
+            font-family: var(--font-main);
+            padding: 15px 40px;
+            font-size: 1.8rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            pointer-events: auto;
+            transition: all 0.1s;
+            box-shadow: 0 6px 0 #2E7D32;
+            color: white;
+            background-color: var(--primary-color);
+        }
+
+        button:active {
+            transform: translateY(6px);
+            box-shadow: 0 0px 0 #2E7D32;
+        }
+
+        button:disabled {
+            background-color: #888;
+            box-shadow: 0 6px 0 #555;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .hidden { display: none !important; }
+
+        /* HUD Top Bar */
+        #hud-top {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 30px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 30px;
+            border-radius: 30px;
+            font-size: 1.5rem;
+            font-weight: 600;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .hud-item { display: flex; align-items: center; gap: 10px;}
+        .hud-value { color: #FFEB3B; }
+
+        /* Notification Box */
+        #notification-box {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.8rem;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 1px 1px 3px #000;
+            padding: 5px 20px;
+            border-radius: 10px;
+            transition: opacity 0.3s;
+            opacity: 0;
+        }
+        
+        .noti-good { color: var(--primary-color); background: rgba(0,0,0,0.5); }
+        .noti-bad { color: var(--danger-color); background: rgba(0,0,0,0.5); }
+        .noti-info { color: #03A9F4; background: rgba(0,0,0,0.5); }
+
+        /* Score Popup Overlay */
+        #score-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 6rem;
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(0,0,0,0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+            z-index: 50;
+        }
+
+        .popup-animate {
+            animation: popUpAnim 1s ease-out forwards;
+        }
+
+        @keyframes popUpAnim {
+            0% { opacity: 0; transform: translate(-50%, -30%) scale(0.5); }
+            20% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+            80% { opacity: 1; transform: translate(-50%, -60%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -80%) scale(0.8); }
+        }
+
+        /* Hand Status HUD */
+        #hand-status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.6);
+            padding: 10px 15px;
+            border-radius: 15px;
+            font-size: 1rem;
+            text-align: right;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+            background-color: var(--danger-color);
+        }
+        .status-dot.active { background-color: var(--primary-color); }
+
+        /* Side Controls */
+        #side-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: auto;
+        }
+
+        .control-btn {
+            font-size: 1.2rem;
+            padding: 10px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 0 #1a1a1a;
+            width: 150px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .control-btn.toggle-on {
+            background-color: var(--primary-color);
+            box-shadow: 0 4px 0 #2E7D32;
+        }
+        
+        .control-btn.toggle-off {
+            background-color: #555;
+            box-shadow: 0 4px 0 #333;
+        }
+
+        .control-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0px 0 transparent !important;
+        }
+
+        /* Charge Bar */
+        #charge-bar-container {
+            position: absolute;
+            bottom: 20%;
+            left: 50%; /* Starts around center, will be moved near bow in JS */
+            width: 30px;
+            height: 200px;
+            background: rgba(0,0,0,0.5);
+            border: 2px solid white;
+            border-radius: 15px;
+            overflow: hidden;
+            display: none; /* Hidden until pulling */
+            transform: translateX(-50%);
+            z-index: 20;
+        }
+
+        #charge-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 0%;
+            background: linear-gradient(0deg, #4CAF50 0%, #FFEB3B 50%, #F44336 100%);
+            transition: height 0.1s;
+        }
+
+        #charge-text {
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: bold;
+            font-size: 1.2rem;
+            text-shadow: 1px 1px 2px #000;
+        }
+
+        /* 2D Word Labels for Fruits */
+        #labels-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .fruit-label {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            color: #000;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            transform: translate(-50%, -150%); /* Center above point */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            border: 2px solid #333;
+            transition: opacity 0.3s;
+        }
+
+        /* Game Over Screen */
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            pointer-events: auto;
+        }
+        
+        #final-score-text {
+            font-size: 5rem;
+            color: #FFEB3B;
+            margin: 20px 0;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Background Video (AR) -->
+        <video id="video-element" autoplay playsinline></video>
+
+        <!-- 3D Canvas -->
+        <canvas id="canvas-3d"></canvas>
+
+        <!-- Visual Zones -->
+        <div id="left-zone"></div>
+        <div id="right-zone"></div>
+
+        <!-- 2D UI Overlay Layer -->
+        <div id="ui-layer">
+            
+            <!-- HUD -->
+            <div id="hud-top" class="hidden">
+                <div class="hud-item">คะแนน: <span id="score-val" class="hud-value">0</span></div>
+                <div class="hud-item">เวลา: <span id="time-val" class="hud-value">00:00</span></div>
+                <div class="hud-item">ข้อ: <span id="round-val" class="hud-value">0/15</span></div>
+            </div>
+
+            <!-- Notifications -->
+            <div id="notification-box">แจ้งเตือน</div>
+
+            <!-- Hand Status -->
+            <div id="hand-status" class="hidden">
+                <div><span class="status-dot" id="dot-left"></span>มือซ้าย: <span id="status-left">ไม่พบ</span></div>
+                <div><span class="status-dot" id="dot-right"></span>มือขวา: <span id="status-right">ไม่พบ</span></div>
+            </div>
+
+            <!-- Score Popup Overlay -->
+            <div id="score-popup"></div>
+
+            <!-- Charge Bar -->
+            <div id="charge-bar-container">
+                <div id="charge-text">0%</div>
+                <div id="charge-fill"></div>
+            </div>
+
+            <!-- Side Controls -->
+            <div id="side-controls" class="hidden">
+                <button id="btn-swap-hands" class="control-btn toggle-off"><span>สลับมือ</span> <span>ปิด</span></button>
+                <button id="btn-debug-hands" class="control-btn toggle-off"><span>จุดมือ</span> <span>ปิด</span></button>
+                <button id="btn-audio" class="control-btn toggle-on"><span>เสียง</span> <span>เปิด</span></button>
+                <button id="btn-restart-side" class="control-btn" style="background-color:#FF9800; box-shadow: 0 4px 0 #E65100; justify-content:center;">เริ่มใหม่</button>
+            </div>
+
+            <!-- 2D Word Labels Container -->
+            <div id="labels-container"></div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="start-screen">
+            <h1>AR ยิงธนูสู้คำกริยา</h1>
+            <div class="rules-box">
+                <h3>วิธีเล่น</h3>
+                <p>1. ถอยห่างจากกล้อง ให้เห็นมือซ้ายและขวาชัดเจน</p>
+                <p>2. ใช้ <b>มือซ้าย</b> ถือคันธนู (ต้องอยู่ฝั่งขวาของจอ)</p>
+                <p>3. <b>กำมือขวา</b> เพื่อดึงสายธนู (ชาร์จแรง)</p>
+                <p>4. <b>แบมือขวา</b> เพื่อยิงลูกธนู</p>
+                <p style="color:var(--danger-color); font-weight:bold; margin-top:10px;">เป้าหมาย: ยิงเฉพาะ "คำกริยา" เท่านั้น!</p>
+            </div>
+
+            <div class="check-list">
+                <div class="check-item">
+                    <span>1. เปิดกล้อง</span>
+                    <div id="check-cam" class="status-icon"><div class="spinner"></div></div>
+                </div>
+                <div class="check-item">
+                    <span>2. โหลด AI Track มือ</span>
+                    <div id="check-ai" class="status-icon"><div class="spinner"></div></div>
+                </div>
+            </div>
+
+            <button id="btn-check-system">ตรวจสอบระบบ</button>
+            <button id="btn-start-game" class="hidden">เริ่มเกม</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="hidden">
+            <h1>จบเกม!</h1>
+            <div id="final-score-text">0</div>
+            <h2 id="final-feedback" style="margin-bottom:30px;">ยอดเยี่ยม!</h2>
+            <button id="btn-restart-game">เล่นอีกครั้ง</button>
+        </div>
+
+    </div>
+
+    <script>
+        /* ==========================================
+           1. CONFIG & VOCABULARY
+           ========================================== */
+        const CONFIG = {
+            totalRounds: 15,
+            verbScore: 10,
+            distractorPenalty: 5,
+            dropPenalty: 5,
+            leftZoneLimitX: 0.25, // 25% of screen
+            rightZoneLimitX: 0.5, // 50% of screen
+            fallSpeedBase: 0.003, // Y units per frame
+            drawMaxDistance: 0.4, // Max pull distance in normalized coords for 100% power
+            deadZone: 0.05, // Minimum pull before charging starts
+            arrowSpeedMulti: 3.0,
+            gravity: 0.015,
+            handHoldBufferTime: 300, // ms to hold draw state if hand lost
+            sceneZScale: -5, // Z depth base
+        };
+
+        const VOCAB = {
+            verbs: ["วิ่ง", "กิน", "อ่าน", "เขียน", "นอน", "เดิน", "กระโดด", "ร้อง", "ว่ายน้ำ", "เต้น", "ยิ้ม", "หัวเราะ"],
+            nouns: ["ครู", "บ้าน", "โรงเรียน", "แมว", "หนังสือ", "โต๊ะ", "ดินสอ", "นักเรียน", "ต้นไม้", "รถ", "ปลา", "ข้าว"]
+        };
+
+        /* ==========================================
+           2. GAME STATE
+           ========================================== */
+        const STATE = {
+            isPlaying: false,
+            score: 0,
+            round: 0,
+            timeStart: 0,
+            timeStr: "00:00",
+            
+            // System Checks
+            camReady: false,
+            aiReady: false,
+
+            // Settings
+            swapHands: false,
+            debugHands: false,
+            audioMuted: false,
+
+            // Tracking Data (Normalized coords 0-1)
+            hands: { left: null, right: null }, // Hand landmarks
+            gestures: { right: 'none' }, // 'fist', 'open', 'semi'
+            lastRightHandTime: 0,
+
+            // Bow Mechanics
+            bowPos: { x: 0, y: 0, z: -4 },
+            bowTargetPos: { x: 0.75, y: 0.5 }, // Default right side
+            isDrawing: false,
+            chargePower: 0, // 0 to 1
+            lastValidCharge: 0,
+            drawStartPos: null, // Initial fist position
+            currentDrawPos: null,
+
+            // Game Objects
+            fruits: [], // { mesh, labelDiv, type, word, isFalling, fallSpeed }
+            arrows: [], // { mesh, velocity, state: 'flying'|'pinned', pinnedObj }
+            
+            // Animation Frame
+            animId: null
+        };
+
+        /* ==========================================
+           3. DOM ELEMENTS
+           ========================================== */
+        const DOM = {
+            video: document.getElementById('video-element'),
+            startScreen: document.getElementById('start-screen'),
+            gameOverScreen: document.getElementById('game-over-screen'),
+            btnCheck: document.getElementById('btn-check-system'),
+            btnStart: document.getElementById('btn-start-game'),
+            btnRestart: document.getElementById('btn-restart-game'),
+            checkCam: document.getElementById('check-cam'),
+            checkAi: document.getElementById('check-ai'),
+            
+            hudTop: document.getElementById('hud-top'),
+            scoreVal: document.getElementById('score-val'),
+            timeVal: document.getElementById('time-val'),
+            roundVal: document.getElementById('round-val'),
+            
+            notiBox: document.getElementById('notification-box'),
+            scorePopup: document.getElementById('score-popup'),
+            
+            handStatus: document.getElementById('hand-status'),
+            statusLeft: document.getElementById('status-left'),
+            statusRight: document.getElementById('status-right'),
+            dotLeft: document.getElementById('dot-left'),
+            dotRight: document.getElementById('dot-right'),
+            
+            sideControls: document.getElementById('side-controls'),
+            btnSwap: document.getElementById('btn-swap-hands'),
+            btnDebug: document.getElementById('btn-debug-hands'),
+            btnAudio: document.getElementById('btn-audio'),
+            btnRestartSide: document.getElementById('btn-restart-side'),
+
+            chargeBarContainer: document.getElementById('charge-bar-container'),
+            chargeFill: document.getElementById('charge-fill'),
+            chargeText: document.getElementById('charge-text'),
+
+            labelsContainer: document.getElementById('labels-container'),
+            
+            finalScoreText: document.getElementById('final-score-text'),
+            finalFeedback: document.getElementById('final-feedback')
+        };
+
+        /* ==========================================
+           4. AUDIO SYNTHESIZER (Web Audio API)
+           ========================================== */
+        const AudioSys = {
+            ctx: null,
+            init: function() {
+                if(!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if(this.ctx.state === 'suspended') this.ctx.resume();
+            },
+            playOscillator: function(freq, type, duration, vol, pitchDrop = false) {
+                if(STATE.audioMuted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                if(pitchDrop) {
+                    osc.frequency.exponentialRampToValueAtTime(freq/2, this.ctx.currentTime + duration);
+                }
+
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+            playTone: function(freq, duration=0.1, type='sine', vol=0.5) { this.playOscillator(freq, type, duration, vol); },
+            
+            // Specific Sounds
+            click: () => AudioSys.playTone(600, 0.05, 'square', 0.1),
+            toggle: (on) => AudioSys.playTone(on ? 800 : 400, 0.1, 'sine', 0.1),
+            ready: () => { AudioSys.playTone(400, 0.1, 'sine', 0.2); setTimeout(()=>AudioSys.playTone(800, 0.2, 'sine', 0.2), 100); },
+            gameStart: () => { 
+                AudioSys.playTone(440, 0.2, 'square', 0.2); 
+                setTimeout(()=>AudioSys.playTone(554, 0.2, 'square', 0.2), 200);
+                setTimeout(()=>AudioSys.playTone(659, 0.4, 'square', 0.2), 400);
+            },
+            
+            // Bow sounds require reference to track continuous changes, simplifying for this constraint
+            chargeOsc: null,
+            chargeGain: null,
+            startCharge: function() {
+                if(STATE.audioMuted || !this.ctx) return;
+                this.stopCharge();
+                this.chargeOsc = this.ctx.createOscillator();
+                this.chargeGain = this.ctx.createGain();
+                this.chargeOsc.type = 'triangle';
+                this.chargeOsc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                this.chargeGain.gain.setValueAtTime(0, this.ctx.currentTime);
+                this.chargeOsc.connect(this.chargeGain);
+                this.chargeGain.connect(this.ctx.destination);
+                this.chargeOsc.start();
+            },
+            updateCharge: function(power) {
+                if(!this.chargeOsc) return;
+                const freq = 200 + (power * 400); // 200 to 600 Hz
+                const vol = 0.05 + (power * 0.15); // 0.05 to 0.2
+                this.chargeOsc.frequency.linearRampToValueAtTime(freq, this.ctx.currentTime + 0.1);
+                this.chargeGain.gain.linearRampToValueAtTime(vol, this.ctx.currentTime + 0.1);
+            },
+            stopCharge: function() {
+                if(this.chargeOsc) {
+                    try { this.chargeOsc.stop(); this.chargeOsc.disconnect(); this.chargeGain.disconnect(); } catch(e){}
+                    this.chargeOsc = null;
+                }
+            },
+            
+            releaseArrow: (power) => {
+                AudioSys.stopCharge();
+                // Swoosh sound (white noise approx using high freq drops)
+                AudioSys.playOscillator(800 + power*400, 'sawtooth', 0.3, 0.2 + power*0.1, true);
+            },
+            lowPowerDrop: () => AudioSys.playOscillator(200, 'sine', 0.4, 0.2, true),
+            
+            hitVerb: () => {
+                // Success chime
+                AudioSys.playTone(523.25, 0.1, 'sine', 0.3); // C5
+                setTimeout(()=>AudioSys.playTone(659.25, 0.1, 'sine', 0.3), 100); // E5
+                setTimeout(()=>AudioSys.playTone(783.99, 0.3, 'sine', 0.3), 200); // G5
+            },
+            hitDistractor: () => {
+                // Error buzz
+                AudioSys.playOscillator(150, 'sawtooth', 0.3, 0.3, true);
+            },
+            verbDrop: () => {
+                // Sad fall sound
+                AudioSys.playOscillator(300, 'triangle', 0.5, 0.2, true);
+            },
+            pinWall: () => AudioSys.playTone(100, 0.05, 'square', 0.1),
+            nextRound: () => AudioSys.playTone(800, 0.3, 'sine', 0.1),
+            gameOver: () => {
+                AudioSys.playTone(523, 0.2, 'square', 0.3);
+                setTimeout(()=>AudioSys.playTone(659, 0.2, 'square', 0.3), 200);
+                setTimeout(()=>AudioSys.playTone(784, 0.2, 'square', 0.3), 400);
+                setTimeout(()=>AudioSys.playTone(1046, 0.6, 'square', 0.3), 600);
+            }
+        };
+
+        /* ==========================================
+           5. UI & UTILITIES
+           ========================================== */
+        const UI = {
+            showNotify: (text, type) => {
+                DOM.notiBox.innerText = text;
+                DOM.notiBox.className = '';
+                if(type === 'good') DOM.notiBox.classList.add('noti-good');
+                else if(type === 'bad') DOM.notiBox.classList.add('noti-bad');
+                else DOM.notiBox.classList.add('noti-info');
+                
+                DOM.notiBox.style.opacity = '1';
+                setTimeout(() => { DOM.notiBox.style.opacity = '0'; }, 2000);
+            },
+            
+            showScorePopup: (amount) => {
+                DOM.scorePopup.innerText = (amount > 0 ? '+' : '') + amount;
+                DOM.scorePopup.style.color = amount > 0 ? varColor('--primary-color') : varColor('--danger-color');
+                DOM.scorePopup.classList.remove('popup-animate');
+                void DOM.scorePopup.offsetWidth; // trigger reflow
+                DOM.scorePopup.classList.add('popup-animate');
+            },
+
+            updateHUD: () => {
+                DOM.scoreVal.innerText = STATE.score;
+                DOM.roundVal.innerText = `${STATE.round}/${CONFIG.totalRounds}`;
+                
+                // Hand Status
+                if(STATE.hands.left) {
+                    DOM.statusLeft.innerText = "เจอ";
+                    DOM.dotLeft.classList.add('active');
+                } else {
+                    DOM.statusLeft.innerText = "ไม่พบ";
+                    DOM.dotLeft.classList.remove('active');
+                }
+                
+                if(STATE.hands.right) {
+                    let text = STATE.gestures.right === 'fist' ? "กำมือ" : (STATE.gestures.right === 'open' ? "แบมือ" : "กึ่งแบ");
+                    DOM.statusRight.innerText = text;
+                    DOM.dotRight.classList.add('active');
+                } else {
+                    DOM.statusRight.innerText = "ไม่พบ";
+                    DOM.dotRight.classList.remove('active');
+                }
+            },
+
+            updateChargeBar: () => {
+                if(STATE.isDrawing) {
+                    DOM.chargeBarContainer.style.display = 'block';
+                    let pct = Math.floor(STATE.chargePower * 100);
+                    DOM.chargeFill.style.height = pct + '%';
+                    DOM.chargeText.innerText = pct + '%';
+                    
+                    // Position roughly near center right
+                    DOM.chargeBarContainer.style.left = '60%'; 
+                } else {
+                    DOM.chargeBarContainer.style.display = 'none';
+                }
+            },
+            
+            formatTime: (ms) => {
+                let totalSec = Math.floor(ms / 1000);
+                let m = Math.floor(totalSec / 60);
+                let s = totalSec % 60;
+                return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+        };
+
+        function varColor(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
+        /* ==========================================
+           6. THREE.JS ENGINE SETUP
+           ========================================== */
+        const Scene3D = {
+            scene: null, camera: null, renderer: null,
+            bowGroup: null, stringMesh: null,
+            arrowTemplate: null, fruitTemplates: {},
+            
+            init: function() {
+                const canvas = document.getElementById('canvas-3d');
+                this.renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                
+                this.scene = new THREE.Scene();
+                
+                // Camera setup to roughly match screen aspect
+                const aspect = window.innerWidth / window.innerHeight;
+                // Increased FOV from 45 to 60 for a wider view
+                this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
+                this.camera.position.z = 7; // Moved camera further back (from 5 to 7) to see more of the scene
+                
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(5, 5, 5);
+                this.scene.add(dirLight);
+
+                this.createBow();
+                this.createArrowTemplate();
+                this.createFruitTemplates();
+                
+                window.addEventListener('resize', this.onWindowResize.bind(this), false);
+            },
+            
+            onWindowResize: function() {
+                if(!this.camera || !this.renderer) return;
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            },
+
+            // Convert Normalized Screen Coords (0-1) to 3D World Coords at a specific Z depth
+            screenToWorld: function(nx, ny, depthZ) {
+                // nx, ny are 0 to 1, origin top-left. Three.js is -1 to 1, origin center, Y up.
+                const vec = new THREE.Vector3();
+                const pos = new THREE.Vector3();
+                
+                vec.set(
+                    (nx * 2) - 1,
+                    -(ny * 2) + 1,
+                    0.5 
+                );
+                
+                vec.unproject(this.camera);
+                vec.sub(this.camera.position).normalize();
+                
+                const distance = (depthZ - this.camera.position.z) / vec.z;
+                pos.copy(this.camera.position).add(vec.multiplyScalar(distance));
+                return pos;
+            },
+            
+            // Get 2D screen pos from 3D object for labels
+            worldToScreen: function(object, camera) {
+                const vector = new THREE.Vector3();
+                object.getWorldPosition(vector);
+                vector.project(camera);
+                const x = (vector.x * .5 + .5) * window.innerWidth;
+                const y = (vector.y * -.5 + .5) * window.innerHeight;
+                return {x, y};
+            },
+
+            createBow: function() {
+                this.bowGroup = new THREE.Group();
+                
+                // Material
+                const woodMat = new THREE.MeshPhongMaterial({ color: 0x8B4513, shininess: 10 });
+                const gripMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+                const stringMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+                
+                // Bow Handle (Grip)
+                const gripGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.6, 16);
+                const grip = new THREE.Mesh(gripGeo, gripMat);
+                this.bowGroup.add(grip);
+                
+                // Upper Limb (Curved S shape approximation)
+                const limbGeo = new THREE.CylinderGeometry(0.06, 0.03, 1.5, 16);
+                const upperLimb = new THREE.Mesh(limbGeo, woodMat);
+                upperLimb.position.set(0, 1.0, -0.2);
+                upperLimb.rotation.x = Math.PI / 12; // curve forward slightly
+                this.bowGroup.add(upperLimb);
+                
+                // Lower Limb
+                const lowerLimb = new THREE.Mesh(limbGeo, woodMat);
+                lowerLimb.position.set(0, -1.0, -0.2);
+                lowerLimb.rotation.x = -Math.PI / 12;
+                this.bowGroup.add(lowerLimb);
+                
+                // Bowstring (dynamic line)
+                const points = [];
+                points.push(new THREE.Vector3(0, 1.7, -0.4)); // Top tip
+                points.push(new THREE.Vector3(0, 0, -0.4));   // Nock point (moves when drawing)
+                points.push(new THREE.Vector3(0, -1.7, -0.4)); // Bottom tip
+                
+                const stringGeo = new THREE.BufferGeometry().setFromPoints(points);
+                this.stringMesh = new THREE.Line(stringGeo, stringMat);
+                this.bowGroup.add(this.stringMesh);
+
+                // Scale down the bow slightly so it doesn't take up too much screen space
+                this.bowGroup.scale.set(0.7, 0.7, 0.7);
+
+                this.scene.add(this.bowGroup);
+            },
+            
+            updateBowString: function(pullDistanceNormalized) {
+                // Pull distance 0 to 1
+                const nockZ = -0.4 + (pullDistanceNormalized * 2.0); // Pulls back (positive Z relative to bow)
+                
+                const positions = this.stringMesh.geometry.attributes.position.array;
+                // Update middle point (index 1: x, y, z -> array indices 3, 4, 5)
+                positions[3] = 0; // x
+                positions[4] = 0; // y
+                positions[5] = nockZ; // z
+                
+                this.stringMesh.geometry.attributes.position.needsUpdate = true;
+                
+                // Flex limbs slightly
+                const flexAngle = (Math.PI / 12) + (pullDistanceNormalized * (Math.PI/12));
+                this.bowGroup.children[1].rotation.x = flexAngle;
+                this.bowGroup.children[2].rotation.x = -flexAngle;
+            },
+
+            createArrowTemplate: function() {
+                this.arrowTemplate = new THREE.Group();
+                const shaftGeo = new THREE.CylinderGeometry(0.02, 0.02, 2, 8);
+                const shaftMat = new THREE.MeshPhongMaterial({ color: 0xdeb887 });
+                const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+                shaft.rotation.x = Math.PI / 2; // Point along Z axis
+                this.arrowTemplate.add(shaft);
+                
+                const headGeo = new THREE.ConeGeometry(0.06, 0.2, 8);
+                const headMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.z = -1.1; // Pointing negative Z away from camera
+                head.rotation.x = -Math.PI / 2;
+                this.arrowTemplate.add(head);
+                
+                // Fletching (feathers)
+                const fletchGeo = new THREE.BoxGeometry(0.01, 0.1, 0.3);
+                const fletchMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const fletch1 = new THREE.Mesh(fletchGeo, fletchMat);
+                fletch1.position.set(0.03, 0, 0.9);
+                const fletch2 = new THREE.Mesh(fletchGeo, fletchMat);
+                fletch2.position.set(-0.03, 0, 0.9);
+                this.arrowTemplate.add(fletch1);
+                this.arrowTemplate.add(fletch2);
+                
+                // Pre-scale arrow to be reasonable size
+                this.arrowTemplate.scale.set(0.5, 0.5, 0.5);
+            },
+
+            createFruitTemplates: function() {
+                // Apple (Red)
+                const appleGeo = new THREE.SphereGeometry(0.4, 32, 32);
+                const appleMat = new THREE.MeshPhongMaterial({ color: 0xff3333, shininess: 30 });
+                this.fruitTemplates['apple'] = new THREE.Mesh(appleGeo, appleMat);
+                
+                // Orange
+                const orangeGeo = new THREE.SphereGeometry(0.4, 32, 32);
+                const orangeMat = new THREE.MeshPhongMaterial({ color: 0xff9900, shininess: 10 });
+                this.fruitTemplates['orange'] = new THREE.Mesh(orangeGeo, orangeMat);
+                
+                // Melon (Green)
+                const melonGeo = new THREE.SphereGeometry(0.5, 32, 32);
+                melonGeo.scale(1, 1.2, 1);
+                const melonMat = new THREE.MeshPhongMaterial({ color: 0x33cc33, shininess: 20 });
+                this.fruitTemplates['melon'] = new THREE.Mesh(melonGeo, melonMat);
+            }
+        };
+
+
+        /* ==========================================
+           7. HAND TRACKING (MediaPipe)
+           ========================================== */
+        const HandTrack = {
+            hands: null, camera: null,
+            
+            init: async function() {
+                try {
+                    UI.showNotify("กำลังเริ่มกล้อง...", "info");
+                    AudioSys.click();
+                    
+                    // Request higher resolution for better clarity, if available
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: 'user', 
+                            width: { ideal: 1280 }, 
+                            height: { ideal: 720 } 
+                        } 
+                    });
+                    DOM.video.srcObject = stream;
+                    
+                    DOM.video.onloadedmetadata = () => {
+                        STATE.camReady = true;
+                        DOM.checkCam.innerHTML = '<span class="checkmark">✓</span>';
+                        AudioSys.ready();
+                        this.initHands();
+                    };
+                    
+                } catch (err) {
+                    console.error("Camera Error: ", err);
+                    DOM.checkCam.innerHTML = '<span class="error-mark">✗</span>';
+                    UI.showNotify("ไม่สามารถเปิดกล้องได้ โปรดอนุญาตสิทธิ์", "bad");
+                    DOM.btnCheck.disabled = false;
+                }
+            },
+            
+            initHands: function() {
+                this.hands = new Hands({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }});
+                
+                this.hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.5
+                });
+                
+                this.hands.onResults(this.onResults.bind(this));
+                
+                this.camera = new Camera(DOM.video, {
+                    onFrame: async () => { await this.hands.send({image: DOM.video}); },
+                    width: 640, height: 480
+                });
+                
+                this.camera.start().then(() => {
+                    STATE.aiReady = true;
+                    DOM.checkAi.innerHTML = '<span class="checkmark">✓</span>';
+                    AudioSys.ready();
+                    this.checkSystemReady();
+                });
+            },
+            
+            checkSystemReady: function() {
+                if(STATE.camReady && STATE.aiReady) {
+                    DOM.btnCheck.classList.add('hidden');
+                    DOM.btnStart.classList.remove('hidden');
+                    AudioSys.gameStart();
+                }
+            },
+            
+            onResults: function(results) {
+                if(!STATE.isPlaying) return;
+                
+                let leftHandData = null;
+                let rightHandData = null;
+                
+                if (results.multiHandLandmarks && results.multiHandedness) {
+                    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                        const classification = results.multiHandedness[i];
+                        // MediaPipe camera is mirrored by default, so 'Right' label is actually user's Left hand.
+                        // However, we mirrored the video via CSS. To keep it intuitive:
+                        // Left physical hand -> controls bow. Right physical hand -> draws string.
+                        const isRightHand = classification.label === 'Left'; // Flipped logic due to mirror
+                        
+                        let assignedIsRight = isRightHand;
+                        if(STATE.swapHands) assignedIsRight = !assignedIsRight; // Swap logic
+
+                        if(assignedIsRight) rightHandData = results.multiHandLandmarks[i];
+                        else leftHandData = results.multiHandLandmarks[i];
+                    }
+                }
+                
+                // Update State Left (Bow)
+                if(leftHandData) {
+                    // Use wrist (0) or index mcp (5) for center
+                    const p = leftHandData[0];
+                    // Map x from [0,1] camera space. Note: video is mirrored horizontally in CSS, 
+                    // so x=0 in mediapipe is left in mirrored view.
+                    STATE.hands.left = { x: p.x, y: p.y };
+                } else {
+                    STATE.hands.left = null;
+                }
+                
+                // Update State Right (Draw/Shoot)
+                if(rightHandData) {
+                    STATE.lastRightHandTime = Date.now();
+                    const p = rightHandData[0];
+                    STATE.hands.right = { x: p.x, y: p.y };
+                    
+                    // Gesture recognition
+                    STATE.gestures.right = this.detectGesture(rightHandData);
+                } else {
+                    STATE.hands.right = null;
+                    // Keep gesture state briefly if hand lost
+                    if(Date.now() - STATE.lastRightHandTime > CONFIG.handHoldBufferTime) {
+                        STATE.gestures.right = 'none';
+                    }
+                }
+                
+                // Debug Draw
+                if(STATE.debugHands && results.multiHandLandmarks) {
+                   // (Optional: Implement debug canvas drawing over video if needed, omitted for brevity to focus on game mechanics)
+                }
+            },
+            
+            detectGesture: function(landmarks) {
+                // Simple heuristic based on distances from wrist (0) to fingertips (8, 12, 16, 20)
+                const wrist = landmarks[0];
+                const tips = [8, 12, 16, 20];
+                let openCount = 0;
+                
+                // Threshold distance (normalized 0-1)
+                const openThreshold = 0.2; 
+                
+                for(let tipIdx of tips) {
+                    const tip = landmarks[tipIdx];
+                    const dist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                    if(dist > openThreshold) openCount++;
+                }
+                
+                if(openCount <= 1) return 'fist';
+                if(openCount >= 3) return 'open';
+                return 'semi';
+            }
+        };
+
+        /* ==========================================
+           8. GAME MECHANICS (Fruits, Arrows, Logic)
+           ========================================== */
+        const GameCore = {
+            
+            spawnRound: function() {
+                STATE.round++;
+                UI.updateHUD();
+                
+                if(STATE.round > CONFIG.totalRounds) {
+                    this.endGame();
+                    return;
+                }
+                
+                // Clean up old
+                this.clearFruits();
+                
+                // Prepare words: 1 Verb, 2 Nouns
+                const roundVerb = VOCAB.verbs[Math.floor(Math.random() * VOCAB.verbs.length)];
+                let roundNouns = [];
+                let nounPool = [...VOCAB.nouns];
+                for(let i=0; i<2; i++) {
+                    const idx = Math.floor(Math.random() * nounPool.length);
+                    roundNouns.push(nounPool[idx]);
+                    nounPool.splice(idx, 1);
+                }
+                
+                let wordsToSpawn = [
+                    { word: roundVerb, type: 'verb' },
+                    { word: roundNouns[0], type: 'noun' },
+                    { word: roundNouns[1], type: 'noun' }
+                ];
+                
+                // Shuffle array
+                wordsToSpawn.sort(() => Math.random() - 0.5);
+                
+                // Spawn visually in staggered positions in Left Zone (0 to 0.25)
+                const fruitTypes = ['apple', 'orange', 'melon'];
+                
+                wordsToSpawn.forEach((item, index) => {
+                    const fType = fruitTypes[Math.floor(Math.random()*fruitTypes.length)];
+                    const mesh = Scene3D.fruitTemplates[fType].clone();
+                    
+                    // Stagger X and Y
+                    const nx = 0.05 + (index * 0.08); // Spread across 0.05 to 0.21
+                    const ny = -0.2 - (Math.random() * 0.3) - (index*0.2); // Start above screen
+                    
+                    const worldPos = Scene3D.screenToWorld(nx, 0, CONFIG.sceneZScale); // Just get X
+                    mesh.position.set(worldPos.x, 3 + (ny * -5), CONFIG.sceneZScale); // Override Y
+                    
+                    Scene3D.scene.add(mesh);
+                    
+                    // Create HTML Label
+                    const label = document.createElement('div');
+                    label.className = 'fruit-label';
+                    label.innerText = item.word;
+                    DOM.labelsContainer.appendChild(label);
+                    
+                    STATE.fruits.push({
+                        mesh: mesh,
+                        label: label,
+                        type: item.type,
+                        word: item.word,
+                        isFalling: true,
+                        fallSpeed: CONFIG.fallSpeedBase + (Math.random() * 0.001)
+                    });
+                });
+                
+                AudioSys.nextRound();
+            },
+            
+            clearFruits: function() {
+                STATE.fruits.forEach(f => {
+                    Scene3D.scene.remove(f.mesh);
+                    if(f.label && f.label.parentNode) f.label.parentNode.removeChild(f.label);
+                });
+                STATE.fruits = [];
+            },
+            
+            shootArrow: function() {
+                if(STATE.chargePower < 0.1) {
+                    AudioSys.lowPowerDrop();
+                    UI.showNotify("ดึงแรงไม่พอ!", "info");
+                    return;
+                }
+                
+                AudioSys.releaseArrow(STATE.chargePower);
+                
+                const arrow = Scene3D.arrowTemplate.clone();
+                arrow.position.copy(Scene3D.bowGroup.position);
+                
+                // Calculate direction based on bow rotation and aim
+                // For simplicity in this constraints, we shoot mostly along -Z, with slight arcs
+                
+                const power = STATE.chargePower * CONFIG.arrowSpeedMulti;
+                const vel = new THREE.Vector3(0, power * 0.1, -power); // Slightly upward arc
+                
+                // Adjust velocity if bow is pointed (simple offset)
+                vel.x = (0.5 - STATE.hands.left.x) * -2; // Shoot left/right based on hand pos roughly
+                
+                Scene3D.scene.add(arrow);
+                
+                STATE.arrows.push({
+                    mesh: arrow,
+                    velocity: vel,
+                    state: 'flying',
+                    life: 100 // frames roughly
+                });
+            },
+            
+            updatePhysics: function() {
+                // Update Fruits
+                let roundEnded = false;
+                
+                for(let i = STATE.fruits.length -1; i >= 0; i--) {
+                    let f = STATE.fruits[i];
+                    if(f.isFalling) {
+                        f.mesh.position.y -= f.fallSpeed;
+                        f.mesh.rotation.x += 0.02;
+                        f.mesh.rotation.y += 0.01;
+                        
+                        // Update 2D Label position
+                        const screenPos = Scene3D.worldToScreen(f.mesh, Scene3D.camera);
+                        f.label.style.left = screenPos.x + 'px';
+                        f.label.style.top = screenPos.y + 'px';
+                        
+                        // Check bottom bounds (Y < -3 approx)
+                        if(f.mesh.position.y < -3.5) {
+                            if(f.type === 'verb') {
+                                // Dropped Verb -> Penalty and next round
+                                STATE.score = Math.max(0, STATE.score - CONFIG.dropPenalty);
+                                UI.showScorePopup(-CONFIG.dropPenalty);
+                                UI.showNotify(`-${CONFIG.dropPenalty} กริยาตกพื้น!`, "bad");
+                                AudioSys.verbDrop();
+                                f.isFalling = false;
+                                roundEnded = true;
+                            } else {
+                                // Dropped Noun -> Ignore and remove
+                                f.label.style.opacity = '0';
+                                setTimeout(() => {
+                                   if(f.mesh) Scene3D.scene.remove(f.mesh);
+                                   if(f.label.parentNode) f.label.parentNode.removeChild(f.label);
+                                }, 500);
+                                STATE.fruits.splice(i, 1);
+                            }
+                        }
+                    }
+                }
+                
+                // Update Arrows
+                for(let i = STATE.arrows.length -1; i >= 0; i--) {
+                    let a = STATE.arrows[i];
+                    if(a.state === 'flying') {
+                        // Apply gravity
+                        a.velocity.y -= CONFIG.gravity;
+                        
+                        a.mesh.position.add(a.velocity);
+                        
+                        // Point arrow in direction of velocity
+                        const lookTarget = a.mesh.position.clone().add(a.velocity);
+                        a.mesh.lookAt(lookTarget);
+                        
+                        // Collision Detection with Fruits
+                        for(let j = STATE.fruits.length -1; j >= 0; j--) {
+                            let f = STATE.fruits[j];
+                            if(f.isFalling && a.mesh.position.distanceTo(f.mesh.position) < 0.6) {
+                                // Hit!
+                                a.state = 'pinned';
+                                f.isFalling = false;
+                                f.label.style.opacity = '0';
+                                
+                                // Parent fruit to arrow to move together
+                                a.pinnedObj = f.mesh;
+                                Scene3D.scene.remove(f.mesh);
+                                a.mesh.add(f.mesh);
+                                f.mesh.position.set(0,0,0); // relative to arrow head
+                                
+                                // Process hit logic
+                                if(f.type === 'verb') {
+                                    STATE.score += CONFIG.verbScore;
+                                    UI.showScorePopup(CONFIG.verbScore);
+                                    UI.showNotify(`+${CONFIG.verbScore} ถูกต้อง!`, "good");
+                                    AudioSys.hitVerb();
+                                    roundEnded = true; // Wait for fade then next round
+                                } else {
+                                    STATE.score = Math.max(0, STATE.score - CONFIG.distractorPenalty);
+                                    UI.showScorePopup(-CONFIG.distractorPenalty);
+                                    UI.showNotify(`-${CONFIG.distractorPenalty} คำหลอก!`, "bad");
+                                    AudioSys.hitDistractor();
+                                    // Remove distractor from array so it doesn't block, let arrow carry it away
+                                    STATE.fruits.splice(j, 1); 
+                                    // Remove label DOM immediately
+                                    if(f.label.parentNode) f.label.parentNode.removeChild(f.label);
+                                }
+                                break; // Arrow hits one thing
+                            }
+                        }
+                        
+                        // Bounds check (Hit wall / out of bounds)
+                        if(a.state === 'flying' && (a.mesh.position.z < -10 || Math.abs(a.mesh.position.x) > 5 || a.mesh.position.y < -5)) {
+                            a.state = 'pinned'; // stop moving
+                            AudioSys.pinWall();
+                        }
+                        
+                    } else if (a.state === 'pinned') {
+                        a.life--;
+                        if(a.life <= 0) {
+                            // Fade logic (simplified by just removing after time)
+                            Scene3D.scene.remove(a.mesh);
+                            if(a.pinnedObj && a.pinnedObj.parent !== a.mesh) Scene3D.scene.remove(a.pinnedObj);
+                            STATE.arrows.splice(i, 1);
+                        }
+                    }
+                }
+                
+                UI.updateHUD();
+                
+                if(roundEnded) {
+                    // Delay next round slightly
+                    setTimeout(() => { if(STATE.isPlaying) GameCore.spawnRound(); }, 1500);
+                    // Prevent multiple triggers in same frame
+                    STATE.fruits.forEach(f => f.isFalling = false); 
+                }
+            },
+            
+            endGame: function() {
+                STATE.isPlaying = false;
+                DOM.gameOverScreen.classList.remove('hidden');
+                DOM.finalScoreText.innerText = STATE.score;
+                
+                let feedback = "พยายามเข้า!";
+                if(STATE.score > 100) feedback = "ยอดเยี่ยมมาก!";
+                else if (STATE.score > 50) feedback = "เก่งมาก!";
+                DOM.finalFeedback.innerText = feedback;
+                
+                AudioSys.gameOver();
+            }
+        };
+
+        /* ==========================================
+           9. MAIN GAME LOOP
+           ========================================== */
+        function gameLoop() {
+            if(!STATE.isPlaying) return;
+            
+            // 1. Process Hand Inputs for Bow
+            if(STATE.hands.left) {
+                // Map hand X to screen (inverted due to mirror)
+                let nx = STATE.hands.left.x;
+                
+                // Clamp Bow to Right Half (nx >= 0.5)
+                if(nx < CONFIG.rightZoneLimitX) nx = CONFIG.rightZoneLimitX;
+                
+                // Smooth movement towards target
+                const targetPos = Scene3D.screenToWorld(nx, STATE.hands.left.y, CONFIG.sceneZScale + 2); // Bow closer to camera
+                
+                STATE.bowPos.x += (targetPos.x - STATE.bowPos.x) * 0.2;
+                STATE.bowPos.y += (targetPos.y - STATE.bowPos.y) * 0.2;
+                
+                Scene3D.bowGroup.position.set(STATE.bowPos.x, STATE.bowPos.y, targetPos.z);
+            }
+            
+            // 2. Process Draw/Shoot Mechanics (Right Hand)
+            if(STATE.hands.right) {
+                const rHand = STATE.hands.right;
+                
+                if(STATE.gestures.right === 'fist') {
+                    if(!STATE.isDrawing) {
+                        // Start drawing
+                        STATE.isDrawing = true;
+                        STATE.drawStartPos = { ...rHand };
+                        STATE.chargePower = 0;
+                        AudioSys.startCharge();
+                        UI.showNotify("กำลังง้าง...", "info");
+                    } else {
+                        // Update drawing
+                        // Calculate horizontal pull distance (normalized)
+                        let pullDist = Math.max(0, rHand.x - STATE.drawStartPos.x); // Assuming pull to right
+                        if(STATE.swapHands) pullDist = Math.max(0, STATE.drawStartPos.x - rHand.x); // pull to left
+                        
+                        if(pullDist > CONFIG.deadZone) {
+                            let mappedPower = (pullDist - CONFIG.deadZone) / (CONFIG.drawMaxDistance - CONFIG.deadZone);
+                            STATE.chargePower = Math.min(1.0, Math.max(0, mappedPower));
+                            STATE.lastValidCharge = STATE.chargePower;
+                            AudioSys.updateCharge(STATE.chargePower);
+                        }
+                    }
+                } 
+                else if (STATE.gestures.right === 'open') {
+                    if(STATE.isDrawing) {
+                        // Release Shoot
+                        STATE.isDrawing = false;
+                        GameCore.shootArrow();
+                    }
+                }
+                // 'semi' gesture holds state
+            } else {
+                // Hand lost logic handled in buffer, if buffer expires, cancel draw
+                if(STATE.isDrawing && STATE.gestures.right === 'none') {
+                    STATE.isDrawing = false;
+                    AudioSys.stopCharge();
+                }
+            }
+            
+            // Visual Updates based on state
+            if(STATE.isDrawing) {
+                Scene3D.updateBowString(STATE.chargePower);
+                UI.updateChargeBar();
+                
+                // Show arrow on bow
+                let arrowOnBow = Scene3D.bowGroup.getObjectByName('loadedArrow');
+                if(!arrowOnBow) {
+                    arrowOnBow = Scene3D.arrowTemplate.clone();
+                    arrowOnBow.name = 'loadedArrow';
+                    Scene3D.bowGroup.add(arrowOnBow);
+                }
+                arrowOnBow.position.set(0, 0, -0.4 + (STATE.chargePower * 2.0)); // pull back
+                
+            } else {
+                Scene3D.updateBowString(0); // relax string
+                UI.updateChargeBar();
+                
+                // Remove loaded arrow
+                const arrowOnBow = Scene3D.bowGroup.getObjectByName('loadedArrow');
+                if(arrowOnBow) Scene3D.bowGroup.remove(arrowOnBow);
+            }
+
+            // 3. Update Game Physics
+            GameCore.updatePhysics();
+            
+            // 4. Update Time
+            const elapsed = Date.now() - STATE.timeStart;
+            DOM.timeVal.innerText = UI.formatTime(elapsed);
+
+            // 5. Render 3D
+            Scene3D.renderer.render(Scene3D.scene, Scene3D.camera);
+            
+            STATE.animId = requestAnimationFrame(gameLoop);
+        }
+
+        /* ==========================================
+           10. EVENT HANDLERS & INIT
+           ========================================== */
+        
+        DOM.btnCheck.addEventListener('click', () => {
+            AudioSys.init();
+            HandTrack.init();
+            DOM.btnCheck.disabled = true;
+            DOM.btnCheck.innerText = "กำลังตรวจสอบ...";
+        });
+
+        DOM.btnStart.addEventListener('click', () => {
+            AudioSys.click();
+            DOM.startScreen.classList.add('hidden');
+            DOM.hudTop.classList.remove('hidden');
+            DOM.sideControls.classList.remove('hidden');
+            
+            startGame();
+        });
+        
+        DOM.btnRestart.addEventListener('click', () => {
+            AudioSys.click();
+            DOM.gameOverScreen.classList.add('hidden');
+            startGame();
+        });
+        
+        DOM.btnRestartSide.addEventListener('click', () => {
+            AudioSys.click();
+            if(confirm("ต้องการเริ่มใหม่ใช่หรือไม่?")) {
+                startGame();
+            }
+        });
+
+        DOM.btnSwap.addEventListener('click', () => {
+            AudioSys.toggle(!STATE.swapHands);
+            STATE.swapHands = !STATE.swapHands;
+            DOM.btnSwap.className = `control-btn ${STATE.swapHands ? 'toggle-on' : 'toggle-off'}`;
+            DOM.btnSwap.children[1].innerText = STATE.swapHands ? 'เปิด' : 'ปิด';
+        });
+        
+        DOM.btnDebug.addEventListener('click', () => {
+            AudioSys.toggle(!STATE.debugHands);
+            STATE.debugHands = !STATE.debugHands;
+            DOM.btnDebug.className = `control-btn ${STATE.debugHands ? 'toggle-on' : 'toggle-off'}`;
+            DOM.btnDebug.children[1].innerText = STATE.debugHands ? 'เปิด' : 'ปิด';
+        });
+        
+        DOM.btnAudio.addEventListener('click', () => {
+            STATE.audioMuted = !STATE.audioMuted;
+            AudioSys.toggle(!STATE.audioMuted);
+            DOM.btnAudio.className = `control-btn ${!STATE.audioMuted ? 'toggle-on' : 'toggle-off'}`;
+            DOM.btnAudio.children[1].innerText = !STATE.audioMuted ? 'เปิด' : 'ปิด';
+        });
+
+        function startGame() {
+            STATE.isPlaying = true;
+            STATE.score = 0;
+            STATE.round = 0;
+            STATE.timeStart = Date.now();
+            STATE.arrows = [];
+            
+            GameCore.clearFruits();
+            UI.updateHUD();
+            
+            if(STATE.animId) cancelAnimationFrame(STATE.animId);
+            gameLoop();
+            
+            setTimeout(() => { GameCore.spawnRound(); }, 1000);
+        }
+
+        // Initialize 3D on load
+        window.onload = () => {
+            Scene3D.init();
+        };
+
+    </script>
+</body>
+</html>
